@@ -115,8 +115,8 @@ export function judge(eventName, hook, run) {
   };
 
   if (run.status === "failed-to-start") {
-    problems.push(`the hook could not start: ${run.error || "unknown error"}`);
-    if (onFailureBlock) return blockedByFailure("failed to start");
+    problems.push(hook.type === "http" ? `HTTP request failed: ${run.error || "unknown error"}` : `the hook could not start: ${run.error || "unknown error"}`);
+    if (onFailureBlock) return blockedByFailure(hook.type === "http" ? "connection failure" : "failed to start");
     effects.push(event && canBlock ? "a hook that cannot start is a non-blocking error: the action goes ahead and a hook error notice appears in the transcript" : "a hook that cannot start is a non-blocking error; a notice appears in the transcript");
     return { outcome: "error", verdict: "cannot start", effects, problems, warnings, parsed, validation };
   }
@@ -143,6 +143,20 @@ export function judge(eventName, hook, run) {
   if (parsed.kind === "text" && parsed.text.length > CAP) bigs.push("stdout");
   for (const b of bigs) warnings.push(`${b} is over 10,000 characters: Claude Code saves it to a file and passes the path with a 2,000-character preview`);
   if (hook.async && code === 2) warnings.push("exit code 2 from an async hook blocks nothing; with asyncRewake it wakes Claude");
+
+  if (hook.type === "http") {
+    if (code !== 0) {
+      problems.push(`HTTP status ${code}: a non-blocking error`);
+      if (onFailureBlock) return blockedByFailure(`HTTP status ${code}`);
+      effects.push(canBlock ? "the action goes ahead; a hook error notice appears in the transcript" : "a hook error notice appears in the transcript");
+      return { outcome: "error", verdict: "non-blocking error", effects, problems, warnings, parsed, validation };
+    }
+    if (parsed.kind !== "empty" && parsed.kind !== "json") {
+      problems.push("HTTP response body is not a JSON object: a non-blocking error");
+      effects.push(canBlock ? "the action goes ahead; a hook error notice appears in the transcript" : "a hook error notice appears in the transcript");
+      return { outcome: "error", verdict: "non-blocking error", effects, problems, warnings, parsed, validation };
+    }
+  }
 
   // exit code 2: a block on the events that block, whatever the JSON says
   if (code === 2 && !hook.async) {

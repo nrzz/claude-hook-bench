@@ -9,6 +9,7 @@ import { ifAllows, valuesFor } from "./matcher.mjs";
 import { loadHooks, shortPath } from "./settings.mjs";
 import { checkHook } from "./check.mjs";
 import { runHook, plan as planRun } from "./runner.mjs";
+import { runHttpHook } from "./http.mjs";
 import { judge } from "./output.mjs";
 import { VERSION } from "./version.mjs";
 
@@ -148,7 +149,7 @@ export async function runBench(io = {}) {
     const event = eventByName(h.event);
     const skip = (reason) => runs.push({ hook: h.n, event: h.event, value: null, label: null, skipped: reason });
     if (!event) { skip("not a hook event, so there is no JSON to send it"); continue; }
-    if (h.type !== "command") { skip(`${h.type || "untyped"} hooks are not run by this bench${h.type === "prompt" || h.type === "agent" ? " (they call a model)" : h.type === "http" ? " (it opens no network connection)" : h.type === "mcp_tool" ? " (it needs the MCP server)" : ""}`); continue; }
+    if (h.type !== "command" && !(io.http && h.type === "http")) { skip(`${h.type || "untyped"} hooks are not run by this bench${h.type === "prompt" || h.type === "agent" ? " (they call a model)" : h.type === "http" ? " (it opens no network connection)" : h.type === "mcp_tool" ? " (it needs the MCP server)" : ""}`); continue; }
     if (h.findings.some((f) => /disableAllHooks|allowManagedHooksOnly/.test(f.message))) { skip(h.findings.find((f) => /disableAllHooks|allowManagedHooksOnly/.test(f.message)).message); continue; }
     let fixtures = [];
     if (custom) {
@@ -187,13 +188,17 @@ export async function runBench(io = {}) {
       const timeoutMs = Math.min(hookTimeoutMs, cap);
       const vars = { CLAUDE_PROJECT_DIR: list.project, CLAUDE_PLUGIN_ROOT: h.pluginRoot || undefined, CLAUDE_PLUGIN_DATA: h.pluginData || undefined };
       if (io.log) io.log(`running #${h.n} ${h.event}${fx.label ? `:${fx.label}` : ""}`);
-      const run = await runHook(h.raw, { input: fx.input, vars, session: { sessionId: session.sessionId, effort: "medium", envFile: fs.existsSync(envFile) ? envFile : null }, cwd: list.project, env: io.env || process.env, timeoutMs });
+      const run = h.type === "http"
+        ? await runHttpHook(h.raw, { input: fx.input, timeoutMs, env: io.env || process.env })
+        : await runHook(h.raw, { input: fx.input, vars, session: { sessionId: session.sessionId, effort: "medium", envFile: fs.existsSync(envFile) ? envFile : null }, cwd: list.project, env: io.env || process.env, timeoutMs });
       const verdict = judge(h.event, { type: h.type, async: h.async, onFailure: h.onFailure }, run);
       if (run.status === "ran" && run.ms > hookTimeoutMs / 2 && hookTimeoutMs <= 60000) verdict.warnings.push(`took ${(run.ms / 1000).toFixed(1)} s of its ${h.timeout} s timeout`);
       if (run.status === "timed-out" && timeoutMs < hookTimeoutMs) verdict.problems[0] = `still running after ${(timeoutMs / 1000).toFixed(0)} s (the bench's cap; the hook's own timeout is ${h.timeout} s, raise the cap with --timeout)`;
       let envWritten = null;
       if (fs.existsSync(envFile)) { const t = fs.readFileSync(envFile, "utf8"); if (t.trim()) envWritten = t; }
-      rec.run = { status: run.status, exitCode: run.exitCode, ms: run.ms, timeoutMs, hookTimeoutMs, stdout: run.stdout, stderr: run.stderr, error: run.error, command: run.plan ? run.plan.display : null, form: run.plan ? run.plan.form : null, shell: run.plan ? run.plan.shell : null };
+      rec.run = h.type === "http"
+        ? { status: run.status, exitCode: run.exitCode, statusCode: run.statusCode, ms: run.ms, timeoutMs, hookTimeoutMs, stdout: run.stdout, stderr: run.stderr, error: run.error, command: null, form: null, shell: null, url: h.raw.url, method: "POST" }
+        : { status: run.status, exitCode: run.exitCode, ms: run.ms, timeoutMs, hookTimeoutMs, stdout: run.stdout, stderr: run.stderr, error: run.error, command: run.plan ? run.plan.display : null, form: run.plan ? run.plan.form : null, shell: run.plan ? run.plan.shell : null };
       rec.verdict = verdict;
       rec.envFile = envWritten;
       runs.push(rec);

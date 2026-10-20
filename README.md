@@ -6,7 +6,7 @@ claude-hook-bench runs every hook of a Claude Code setup with the exact JSON Cla
 
 ## What you get
 
-- `run`: every command hook, run once per matching event value (a `PreToolUse` hook with matcher `Edit|Write` runs with an Edit call and a Write call; a `SessionStart` hook runs for `startup` and `resume`) with a session's JSON on stdin, from a throwaway transcript folder. Per run: the verdict (`denies`, `allows`, `asks`, `keeps Claude working`, `adds context`, `shows a message`, `silent`, `non-blocking error`, `timed out`, `cannot start`), what Claude Code does with the answer, the problems (an invalid field, an exit code that does not block, a timeout) and the warnings (a field the event discards, a misplaced key, a deprecated form), then stdout and stderr. `--command "rm -rf /"` and `--file src/x.ts` change the shell and file fixtures; `--input my.json` sends your own JSON.
+- `run`: every command hook (and `http` hooks with `--http`), run once per matching event value (a `PreToolUse` hook with matcher `Edit|Write` runs with an Edit call and a Write call; a `SessionStart` hook runs for `startup` and `resume`) with a session's JSON on stdin, from a throwaway transcript folder. Per run: the verdict (`denies`, `allows`, `asks`, `keeps Claude working`, `adds context`, `shows a message`, `silent`, `non-blocking error`, `timed out`, `cannot start`), what Claude Code does with the answer, the problems (an invalid field, an exit code that does not block, a timeout) and the warnings (a field the event discards, a misplaced key, a deprecated form), then stdout and stderr. `--command "rm -rf /"` and `--file src/x.ts` change the shell and file fixtures; `--input my.json` sends your own JSON.
 - `list`: every hook with its source file and line, event, matcher, type, timeout and the findings of the static checks: unknown events, matchers that can never match, unsupported handler types, missing scripts and executables, `.cmd` shims in exec form, `jq` that is not installed, `${CLAUDE_PLUGIN_ROOT}` outside a plugin, a bare `$CLAUDE_PROJECT_DIR` in PowerShell, `once` in a settings file, `onFailure` where it has no effect, and more.
 - `explain <hook>`: one hook: when it fires, how it runs, the JSON it gets (every field, as Claude Code sends it) and how its answer is read: what exit 2 does on that event, whether plain stdout reaches Claude, which JSON fields the event honours and which it discards. `explain <Event>` describes an event the same way.
 - `--json` on everything, `--markdown` for the skill, `--fail-on error|warn` for CI.
@@ -52,7 +52,7 @@ Then type `/hook-bench:check`. It runs every hook of the current setup (they rea
 ## Use
 
 ```text
-claude-hook-bench run     [--event <Event[:value]>] [--hook <#|text>] [--input <file.json>] [--command <text>] [--file <path>] [--timeout <s>] [--json | --markdown] [--verbose] [--fail-on error|warn]
+claude-hook-bench run     [--event <Event[:value]>] [--hook <#|text>] [--input <file.json>] [--command <text>] [--file <path>] [--timeout <s>] [--http] [--json | --markdown] [--verbose] [--fail-on error|warn]
 claude-hook-bench list    [--event <Event>] [--hook <#|text>] [--json] [--fail-on error|warn]
 claude-hook-bench explain <#|text|Event> [--json]
 ```
@@ -68,6 +68,7 @@ claude-hook-bench explain <#|text|Event> [--json]
 | `--plugin-dir <dir>` | Also load a plugin folder's hooks, as `claude --plugin-dir` would. Repeatable |
 | `--no-plugins` | Leave installed plugins out |
 | `--timeout <seconds>` | `run`: the most a hook may take in this bench. Default 30. The hook's own timeout (its `timeout` field, or the event's default) still applies when it is shorter, and is reported either way |
+| `--http` | `run`: also run `http` hooks (posts the event's JSON to each hook's url and judges the response) |
 | `--fail-on error\|warn` | Exit 1 when any problem (`error`), or any problem or warning (`warn`), was found. For a build |
 | `--json` | One JSON document on stdout |
 | `--markdown` | `run`: a short markdown report for the skill (at most 40 rows) |
@@ -345,7 +346,7 @@ Checked on 2026-10-15 and 2026-10-16 on Windows 11 with Node 24.19.0, git 2.55 a
 - **16 of the 33 events** were not fired on the binary (the list above); their fixtures follow the reference. `run` marks them `[input from the docs]`.
 - **PowerShell, WebFetch and WebSearch tool inputs**, the MCP tool input and `mcp_server` field, and the `tool_response` of Agent, WebFetch, WebSearch and MCP tools follow the reference, not a recording: the Agent in the recording ran in the background (`status: "async_launched"`), and WebFetch and WebSearch would have reached the network.
 - **Output rules on the 24 events not in the tables above** (Notification, PreCompact, ConfigChange, TaskCreated ...) follow the reference's per-event sections and were not put to the binary.
-- **`http`, `mcp_tool`, `prompt` and `agent` hooks** are listed and checked, not run.
+- **`http` hooks** are run only when `--http` is given (they post the event's JSON to each hook's URL); without `--http`, and for `mcp_tool`, `prompt` and `agent` hooks, they are listed and checked, not run.
 - **Hooks in skill and subagent frontmatter**, hooks added during a session, and server-managed settings are not read.
 - **The `if` filter** is a reading of the reference's rules (subcommands, `$()`, leading assignments, file globs, `domain:` for WebFetch); Claude Code calls its own filter best-effort, and this one was checked against the reference's table, not against the binary.
 - **Which shell Claude Code uses for a shell-form hook** on macOS and Linux (`sh -c` here, as the reference says) was not read from the binary; on Windows it was (Git Bash with `CLAUDE_CODE_GIT_BASH_PATH` set, PowerShell otherwise).
@@ -363,6 +364,7 @@ Checked on 2026-10-15 and 2026-10-16 on Windows 11 with Node 24.19.0, git 2.55 a
 | `src/settings.mjs` | Finding the settings files and the enabled plugins |
 | `src/matcher.mjs`, `src/check.mjs` | Matchers and `if` rules; the static checks |
 | `src/runner.mjs` | Running a hook: exec and shell form, placeholders, environment, timeout. The only file that starts a process |
+| `src/http.mjs` | HTTP hooks: posting event JSON, headers with `allowedEnvVars`, timeout. The only file using network modules |
 | `src/output.mjs` | Parsing a hook's stdout, the output schema, the verdict |
 | `src/report.mjs` | The text, markdown and JSON reports |
 | `skills/check/` | `/hook-bench:check`, the user-only skill |

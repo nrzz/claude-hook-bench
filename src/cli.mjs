@@ -11,8 +11,8 @@ const HELP = `claude-hook-bench ${VERSION}: run every hook of a Claude Code setu
 
 Usage: claude-hook-bench <command> [options]
 
-  run      [--event <Event[:value]>] [--hook <#|text>] [--input <file.json>] [--command <text>] [--file <path>]
-           run each command hook with its event's JSON and report: did it run, exit code, time, what it printed,
+  run      [--event <Event[:value]>] [--hook <#|text>] [--input <file.json>] [--command <text>] [--file <path>] [--http]
+           run each command hook (and http hooks with --http) with its event's JSON and report: did it run, exit code, time, what it printed,
            whether the output is valid for the event, and whether it would block, allow, ask or stay silent
   list     [--event <Event>] [--hook <#|text>]
            every hook from the settings files and enabled plugins, with the problems found without running it
@@ -31,6 +31,7 @@ Options:
   --no-plugins          leave installed plugins out
   --timeout <seconds>   the most a hook may take in this bench (default 30; the hook's own timeout is reported too)
   --fail-on error|warn  exit 1 when any problem (error) or any problem or warning (warn) was found
+  --http                run http hooks too (posts each event's JSON to the hook's url)
   --json                one JSON document on stdout
   --markdown            (run) a short markdown report, for the /hook-bench:check skill
   --verbose             (run) full stdout and stderr of every hook
@@ -41,7 +42,8 @@ Options:
 Exit codes: 0, or 1 with --fail-on when the threshold is met, or 2 for a usage error.
 Environment: CLAUDE_CONFIG_DIR (Claude's config folder), NO_COLOR.
 It reads settings files and plugin folders, runs your command hooks (they really run, with a fake session's JSON) in a
-throwaway session folder, writes nothing else, and never uses the network. http, mcp_tool, prompt and agent hooks are
+throwaway session folder, writes nothing else, and never uses the network unless --http is given. http (without --http),
+mcp_tool, prompt and agent hooks are
 listed and checked but not run.
 `;
 
@@ -49,11 +51,11 @@ class UsageError extends Error {}
 
 const COMMANDS = new Set(["run", "list", "explain"]);
 const FLAGS_WITH_VALUE = new Set(["--project", "--event", "--hook", "--input", "--command", "--file", "--plugin-dir", "--timeout", "--fail-on"]);
-const FLAGS = new Set([...FLAGS_WITH_VALUE, "--no-plugins", "--json", "--markdown", "--verbose", "--no-color", "--keep", "--all-tools", "-h", "--help", "-v", "--version"]);
+const FLAGS = new Set([...FLAGS_WITH_VALUE, "--no-plugins", "--http", "--json", "--markdown", "--verbose", "--no-color", "--keep", "--all-tools", "-h", "--help", "-v", "--version"]);
 
 /** Parse argv into options. */
 export function parseArgs(argv) {
-  const o = { command: null, positional: [], project: null, event: null, hook: null, input: null, commandText: null, file: null, pluginDirs: [], plugins: true, timeout: 30, failOn: null, json: false, markdown: false, verbose: false, noColor: false, keep: false, allTools: false, help: false, version: false };
+  const o = { command: null, positional: [], project: null, event: null, hook: null, input: null, commandText: null, file: null, pluginDirs: [], plugins: true, timeout: 30, failOn: null, json: false, markdown: false, verbose: false, noColor: false, keep: false, allTools: false, http: false, help: false, version: false };
   for (let i = 0; i < argv.length; i++) {
     let a = argv[i];
     let inline = null;
@@ -88,6 +90,7 @@ export function parseArgs(argv) {
           o.failOn = value;
           break;
         case "--no-plugins": o.plugins = false; break;
+        case "--http": o.http = true; break;
         case "--json": o.json = true; break;
         case "--markdown": o.markdown = true; break;
         case "--verbose": o.verbose = true; break;
@@ -155,7 +158,7 @@ export async function main(argv, io = {}) {
           if (!EVENT_NAMES.includes(input.hook_event_name)) throw new UsageError(`--input ${o.input}: hook_event_name must name an event (${EVENT_NAMES.join(", ")})`);
           if (o.event && o.event.split(":")[0] !== input.hook_event_name) throw new UsageError(`--event ${o.event} and the input's hook_event_name ${input.hook_event_name} disagree`);
         }
-        const m = await runBench({ ...common, input, command: o.commandText, file: o.file ? path.resolve(cwd, o.file) : null, timeoutCapMs: Math.round(o.timeout * 1000), allTools: o.allTools, keep: o.keep, log: o.verbose && !o.json && !o.markdown ? (s) => stderr.write(`${s}\n`) : null });
+        const m = await runBench({ ...common, http: o.http, input, command: o.commandText, file: o.file ? path.resolve(cwd, o.file) : null, timeoutCapMs: Math.round(o.timeout * 1000), allTools: o.allTools, keep: o.keep, log: o.verbose && !o.json && !o.markdown ? (s) => stderr.write(`${s}\n`) : null });
         if (o.json) stdout.write(`${toJson(m)}\n`);
         else if (o.markdown) stdout.write(markdownRun(m));
         else stdout.write(renderRun(m, { color, verbose: o.verbose }));

@@ -77,15 +77,19 @@ test("every source file is .mjs and imports only node built-ins it needs and the
     for (const m of read(f).matchAll(/^import\s[^;]*?from\s+"([^"]+)";/gms)) {
       const spec = m[1];
       if (spec === "node:child_process") { assert.equal(path.basename(f), "runner.mjs", `${f} may not start processes`); continue; }
+      if (spec === "node:http" || spec === "node:https") { assert.equal(path.basename(f), "http.mjs", `${f} may not make network requests`); continue; }
       assert.ok(spec.startsWith("./") || spec.startsWith("../") || allowed.has(spec), `${f} imports ${spec}`);
     }
     assert.doesNotMatch(read(f), /\brequire\(|\bimport\(/, `${f} has no dynamic loading`);
   }
 });
 
-test("nothing in the package can reach the network", () => {
+test("nothing in the package can reach the network except http.mjs with node:http/https", () => {
   const banned = /\b(fetch|XMLHttpRequest|WebSocket|EventSource)\s*\(|node:(http|https|http2|net|tls|dns|dgram|worker_threads|cluster|vm)\b|\bprocess\.binding\b|\beval\s*\(|new Function\s*\(/;
-  for (const f of [...files("src", ".mjs"), ...files("bin", ".mjs")]) assert.doesNotMatch(read(f), banned, f);
+  const httpBanned = /\b(fetch|XMLHttpRequest|WebSocket|EventSource)\s*\(|node:(http2|net|tls|dns|dgram|worker_threads|cluster|vm)\b|\bprocess\.binding\b|\beval\s*\(|new Function\s*\(/;
+  for (const f of [...files("src", ".mjs"), ...files("bin", ".mjs")]) {
+    assert.doesNotMatch(read(f), path.basename(f) === "http.mjs" ? httpBanned : banned, f);
+  }
 });
 
 test("only APIs that exist in Node 18 are used", () => {
@@ -129,7 +133,7 @@ test("the README has the sections the house keeps, and names every command and o
   if (!fs.existsSync(path.join(ROOT, "README.md"))) return;
   const readme = read("README.md");
   for (const h of ["## What you get", "## What it costs in tokens", "## Install", "## Use", "## How it works", "## What was verified, and how", "## Not verified", "## Files", "## Contributing", "## Part of the Claude Code toolkit"]) assert.ok(readme.includes(`\n${h}`), h);
-  for (const flag of ["--project", "--event", "--hook", "--input", "--command", "--file", "--plugin-dir", "--no-plugins", "--timeout", "--fail-on", "--json", "--markdown", "--verbose", "--no-color"]) assert.ok(readme.includes(`\`${flag}`), flag);
+  for (const flag of ["--project", "--event", "--hook", "--input", "--command", "--file", "--plugin-dir", "--no-plugins", "--timeout", "--fail-on", "--json", "--markdown", "--verbose", "--no-color", "--http"]) assert.ok(readme.includes(`\`${flag}`), flag);
   for (const cmd of ["claude-hook-bench run", "claude-hook-bench list", "claude-hook-bench explain"]) assert.ok(readme.includes(cmd), cmd);
   assert.ok(readme.includes("npx -y github:nrzz/claude-hook-bench"));
   assert.ok(readme.includes("/plugin install hook-bench@claude-code-toolkit"));

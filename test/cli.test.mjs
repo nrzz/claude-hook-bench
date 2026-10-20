@@ -6,7 +6,7 @@ import { main, parseArgs } from "../src/cli.mjs";
 import { VERSION } from "../src/version.mjs";
 
 test("parseArgs: commands, flags, values, inline values, repeats", () => {
-  const o = parseArgs(["run", "--event", "pretooluse:Bash", "--hook", "3", "--command=rm -rf /", "--file", "a.ts", "--plugin-dir", "p1", "--plugin-dir", "p2", "--timeout", "2.5", "--fail-on", "warn", "--json", "--verbose", "--no-plugins", "--keep", "--all-tools"]);
+  const o = parseArgs(["run", "--event", "pretooluse:Bash", "--hook", "3", "--command=rm -rf /", "--file", "a.ts", "--plugin-dir", "p1", "--plugin-dir", "p2", "--timeout", "2.5", "--fail-on", "warn", "--http", "--json", "--verbose", "--no-plugins", "--keep", "--all-tools"]);
   assert.equal(o.command, "run");
   assert.equal(o.event, "PreToolUse:Bash", "the event name is corrected to its case");
   assert.equal(o.hook, "3");
@@ -15,7 +15,7 @@ test("parseArgs: commands, flags, values, inline values, repeats", () => {
   assert.deepEqual(o.pluginDirs, ["p1", "p2"]);
   assert.equal(o.timeout, 2.5);
   assert.equal(o.failOn, "warn");
-  assert.deepEqual([o.json, o.verbose, o.plugins, o.keep, o.allTools], [true, true, false, true, true]);
+  assert.deepEqual([o.http, o.json, o.verbose, o.plugins, o.keep, o.allTools], [true, true, true, false, true, true]);
   assert.deepEqual(parseArgs(["explain", "Stop"]).positional, ["Stop"]);
   assert.equal(parseArgs(["-v"]).version, true);
   assert.equal(parseArgs(["--help"]).help, true);

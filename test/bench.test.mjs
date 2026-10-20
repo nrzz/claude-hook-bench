@@ -3,6 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import http from "node:http";
 import path from "node:path";
 import { NODE, echoHook, nodeHook, parse, printJson, printText, runMain, sandbox, write } from "./helpers.mjs";
 import { main } from "../src/cli.mjs";
@@ -324,4 +325,129 @@ test("selectHooks and makeSession", () => {
   const ses = makeSession({ project: s.proj, dir: path.join(s.base, "ses") });
   assert.match(ses.sessionId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   assert.ok(fs.existsSync(ses.transcriptPath) && fs.existsSync(ses.agentTranscriptPath) && fs.existsSync(ses.envDir));
+});
+
+test("run --http: post event JSON to http hooks, judge the five response kinds, and fill allowedEnvVars", async () => {
+  let recordedHeaders = null;
+  let recordedBody = null;
+  const server = http.createServer((req, res) => {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", () => {
+      recordedHeaders = req.headers;
+      try { recordedBody = JSON.parse(body); } catch { recordedBody = body; }
+      if (req.url === "/empty") {
+        res.writeHead(200);
+        res.end("");
+      } else if (req.url === "/json-deny") {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify(DENY));
+      } else if (req.url === "/other-body") {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("plain text verdict");
+      } else if (req.url === "/error-500") {
+        res.writeHead(500);
+        res.end("internal error");
+      } else if (req.url === "/env-headers") {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({}));
+      } else {
+        res.writeHead(404);
+        res.end();
+      }
+    });
+  });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  const base = `http://127.0.0.1:${port}`;
+
+  try {
+    const s = sandbox({
+      user: {
+        hooks: {
+          PreToolUse: [
+            { matcher: "Bash", hooks: [{ type: "http", url: `${base}/empty` }] },
+            { matcher: "Bash", hooks: [{ type: "http", url: `${base}/json-deny` }] },
+            { matcher: "Bash", hooks: [{ type: "http", url: `${base}/other-body` }] },
+            { matcher: "Bash", hooks: [{ type: "http", url: `${base}/other-body`, onFailure: "block" }] },
+            { matcher: "Bash", hooks: [{ type: "http", url: `${base}/error-500` }] },
+            { matcher: "Bash", hooks: [{ type: "http", url: `${base}/error-500`, onFailure: "block" }] },
+            { matcher: "Bash", hooks: [{ type: "http", url: "http://127.0.0.1:59999/down" }] },
+            { matcher: "Bash", hooks: [{ type: "http", url: "http://127.0.0.1:59999/down", onFailure: "block" }] },
+            { matcher: "Bash", hooks: [{ type: "http", url: `${base}/env-headers`, headers: { "Authorization": "Bearer $TOKEN", "X-Unallowed": "$SECRET", "X-Braced": "${TOKEN}", "X-Mixed": "$TOKEN-$SECRET" }, allowedEnvVars: ["TOKEN"] }] },
+          ],
+        },
+      },
+    });
+
+    // 1. Without --http, http hooks are not run
+    const off = await run(s, ["run", "--json"]);
+    const offModel = parse(off.out);
+    assert.equal(offModel.summary.runs, 0);
+    assert.ok(offModel.runs.every((r) => r.skipped === "http hooks are not run by this bench (it opens no network connection)"));
+
+    // 2. With --http, they run and report their verdicts
+    const on = await run(s, ["run", "--http", "--json"], { env: s.env({ TOKEN: "test-token-123", SECRET: "hidden-key" }) });
+    const m = parse(on.out);
+    assert.equal(m.summary.runs, 9);
+
+    // #1: 2xx with empty body -> silent
+    assert.equal(m.runs[0].run.status, "ran");
+    assert.equal(m.runs[0].verdict.outcome, "silent");
+    assert.equal(m.runs[0].verdict.verdict, "silent");
+    assert.equal(m.runs[0].verdict.problems.length, 0);
+
+    // #2: 2xx with JSON object body -> denies
+    assert.equal(m.runs[1].run.status, "ran");
+    assert.equal(m.runs[1].verdict.outcome, "block");
+    assert.equal(m.runs[1].verdict.verdict, "denies");
+    assert.match(m.runs[1].verdict.effects[0], /no rm/);
+
+    // #3: 2xx with other body -> non-blocking error
+    assert.equal(m.runs[2].run.status, "ran");
+    assert.equal(m.runs[2].verdict.outcome, "error");
+    assert.equal(m.runs[2].verdict.verdict, "non-blocking error");
+    assert.match(m.runs[2].verdict.problems[0], /not a JSON object/);
+
+    // #4: 2xx with other body and onFailure: "block" -> still non-blocking error!
+    assert.equal(m.runs[3].run.status, "ran");
+    assert.equal(m.runs[3].verdict.outcome, "error");
+    assert.equal(m.runs[3].verdict.verdict, "non-blocking error");
+
+    // #5: non-2xx status code (500) -> non-blocking error
+    assert.equal(m.runs[4].run.status, "ran");
+    assert.equal(m.runs[4].verdict.outcome, "error");
+    assert.equal(m.runs[4].verdict.verdict, "non-blocking error");
+    assert.match(m.runs[4].verdict.problems[0], /HTTP status 500/);
+
+    // #6: non-2xx status code (500) with onFailure: "block" -> blocks
+    assert.equal(m.runs[5].run.status, "ran");
+    assert.equal(m.runs[5].verdict.outcome, "block");
+    assert.equal(m.runs[5].verdict.verdict, "blocks");
+
+    // #7: connection failure -> cannot start (non-blocking error)
+    assert.equal(m.runs[6].run.status, "failed-to-start");
+    assert.equal(m.runs[6].verdict.outcome, "error");
+    assert.equal(m.runs[6].verdict.verdict, "cannot start");
+
+    // #8: connection failure with onFailure: "block" -> blocks
+    assert.equal(m.runs[7].run.status, "failed-to-start");
+    assert.equal(m.runs[7].verdict.outcome, "block");
+    assert.equal(m.runs[7].verdict.verdict, "blocks");
+
+    // #9: allowedEnvVars in headers
+    assert.equal(recordedHeaders["authorization"], "Bearer test-token-123");
+    assert.equal(recordedHeaders["x-unallowed"], "");
+    assert.equal(recordedHeaders["x-braced"], "test-token-123");
+    assert.equal(recordedHeaders["x-mixed"], "test-token-123-");
+    assert.equal(recordedBody.hook_event_name, "PreToolUse");
+    assert.equal(recordedBody.tool_name, "Bash");
+
+    // Also test human-readable terminal output with --http
+    const textRun = await run(s, ["run", "--http", "--hook", "1"]);
+    assert.match(textRun.out, /PreToolUse:Bash\s+silent/);
+  } finally {
+    server.close();
+  }
 });

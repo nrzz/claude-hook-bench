@@ -269,6 +269,57 @@ test("warnings for fields that do nothing where they are, and the 10,000-charact
   assert.equal(slowEvent.outcome, "silent");
 });
 
+test("http hook response judging covers the five response kinds", () => {
+  const httpHook = { type: "http", async: false, onFailure: "continue" };
+  const httpBlock = { type: "http", async: false, onFailure: "block" };
+
+  // 1. 2xx with empty body
+  const empty = judge("PreToolUse", httpHook, ran("", 0));
+  assert.equal(empty.outcome, "silent");
+  assert.equal(empty.verdict, "silent");
+  assert.equal(empty.problems.length, 0);
+
+  // 2. 2xx with JSON object body
+  const denyJson = judge("PreToolUse", httpHook, ran(J(DENY), 0));
+  assert.equal(denyJson.outcome, "block");
+  assert.equal(denyJson.verdict, "denies");
+
+  // 3. 2xx with any other body: non-blocking error (even with onFailure: block)
+  const textBody = judge("PreToolUse", httpHook, ran("plain text", 0));
+  assert.equal(textBody.outcome, "error");
+  assert.equal(textBody.verdict, "non-blocking error");
+  assert.match(textBody.problems[0], /not a JSON object/);
+
+  const textBodyBlock = judge("PreToolUse", httpBlock, ran("plain text", 0));
+  assert.equal(textBodyBlock.outcome, "error", "2xx with non-JSON body stays a non-blocking error");
+  assert.equal(textBodyBlock.verdict, "non-blocking error");
+
+  const invalidJson = judge("PreToolUse", httpHook, ran("{bad json", 0));
+  assert.equal(invalidJson.outcome, "error");
+  assert.equal(invalidJson.verdict, "non-blocking error");
+
+  // 4. non-2xx status: non-blocking error, turned to block by onFailure: block
+  const err500 = judge("PreToolUse", httpHook, ran("internal error", 500));
+  assert.equal(err500.outcome, "error");
+  assert.equal(err500.verdict, "non-blocking error");
+  assert.match(err500.problems[0], /HTTP status 500/);
+
+  const err500Block = judge("PreToolUse", httpBlock, ran("internal error", 500));
+  assert.equal(err500Block.outcome, "block");
+  assert.equal(err500Block.verdict, "blocks");
+
+  // 5. connection failure: cannot start, turned to block by onFailure: block
+  const connErr = judge("PreToolUse", httpHook, { status: "failed-to-start", exitCode: null, stdout: "", stderr: "", ms: 0, timeoutMs: 1000, error: "connect ECONNREFUSED" });
+  assert.equal(connErr.outcome, "error");
+  assert.equal(connErr.verdict, "cannot start");
+  assert.match(connErr.problems[0], /HTTP request failed/);
+
+  const connErrBlock = judge("PreToolUse", httpBlock, { status: "failed-to-start", exitCode: null, stdout: "", stderr: "", ms: 0, timeoutMs: 1000, error: "connect ECONNREFUSED" });
+  assert.equal(connErrBlock.outcome, "block");
+  assert.equal(connErrBlock.verdict, "blocks");
+  assert.match(connErrBlock.effects[0], /connection failure; blocking because onFailure is "block"/);
+});
+
 test("every outcome word the reports know is one judge() can produce", () => {
   assert.deepEqual([...OUTCOMES].sort(), ["allow", "ask", "block", "cancelled", "context", "continue", "defer", "error", "ignored", "message", "replace", "silent", "stop"]);
   for (const e of EVENTS) assert.ok(OUTCOMES.includes(judge(e.name, cmd, ran("")).outcome), e.name);
