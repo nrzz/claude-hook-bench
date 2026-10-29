@@ -3,6 +3,7 @@
 //   error  the hook will not run, or will not do what it says
 //   warn   it runs, but something is off (a field that is ignored, a pitfall the reference names)
 //   info   worth knowing, nothing to fix
+import { headerEnvVars } from "./http.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { EVENT_NAMES, TOOL_EVENTS, eventByName, matcherKind, matcherList } from "./events.mjs";
@@ -110,7 +111,7 @@ export function checkHook(h, ctx = {}) {
   }
   if (type === "http") {
     if (typeof raw.url !== "string" || !/^https?:\/\//.test(raw.url)) push("error", 'an http hook needs a "url" starting with http:// or https://');
-    if (raw.headers && typeof raw.headers === "object" && /\$\{?[A-Z_][A-Z0-9_]*\}?/.test(JSON.stringify(raw.headers)) && !Array.isArray(raw.allowedEnvVars)) push("warn", 'the headers reference an environment variable, but "allowedEnvVars" does not list it: Claude Code replaces unlisted references with empty strings');
+    if (raw.headers && typeof raw.headers === "object" && Object.values(raw.headers).some(val => headerEnvVars(val).some(name => !Array.isArray(raw.allowedEnvVars) || !raw.allowedEnvVars.includes(name)))) push("warn", 'the headers reference an environment variable, but "allowedEnvVars" does not list it: Claude Code replaces unlisted references with empty strings');
     if (h.event === "WorktreeCreate") push("info", "an HTTP WorktreeCreate hook returns hookSpecificOutput.worktreePath");
   }
   if (type === "mcp_tool") {

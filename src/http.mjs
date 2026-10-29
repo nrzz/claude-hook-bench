@@ -3,7 +3,14 @@
 import http from "node:http";
 import https from "node:https";
 
+/** Find environment variable references in an HTTP header value. */
+export function headerEnvVars(value) {
+  if (typeof value !== "string") return [];
+  return [...value.matchAll(/\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}|\$([a-zA-Z_][a-zA-Z0-9_]*)/g)]
+    .map((match) => match[1] || match[2]);
+}
 /** Resolve $VAR and ${VAR} in headers, filling only variables listed in allowedEnvVars. */
+
 export function resolveHeaders(rawHeaders, allowedEnvVars, env = process.env) {
   const headers = {};
   if (!rawHeaders || typeof rawHeaders !== "object") return headers;

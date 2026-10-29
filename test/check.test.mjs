@@ -77,6 +77,8 @@ test("http, mcp_tool, prompt and agent hooks", () => {
   assert.ok(has(msgs(entry("Stop", { type: "http", url: "x.example" })), /error: an http hook needs a "url" starting with http/));
   assert.ok(has(msgs(entry("Stop", { type: "http", url: "https://x.example", headers: { Authorization: "Bearer $MY_TOKEN" } })), /warn: the headers reference an environment variable, but "allowedEnvVars" does not list it/));
   assert.ok(!has(msgs(entry("Stop", { type: "http", url: "https://x.example", headers: { Authorization: "Bearer $MY_TOKEN" }, allowedEnvVars: ["MY_TOKEN"] })), /warn/));
+  assert.ok(has(msgs(entry("Stop", { type: "http", url: "https://x.example", headers: { Authorization: "Bearer ${MY_TOKEN}" } })), /warn: the headers reference an environment variable, but "allowedEnvVars" does not list it/));
+  assert.ok(has(msgs(entry("Stop", { type: "http", url: "https://x.example", headers: { Authorization: "Bearer $MY_TOKEN" }, allowedEnvVars: [] })), /warn: the headers reference an environment variable, but "allowedEnvVars" does not list it/));
   assert.ok(has(msgs(entry("Stop", { type: "mcp_tool", server: "s" })), /error: an mcp_tool hook needs "server" and "tool" strings/));
   assert.ok(has(msgs(entry("SessionStart", { type: "mcp_tool", server: "s", tool: "t" })), /warn: mcp_tool hooks on SessionStart are skipped at launch/));
   assert.ok(has(msgs(entry("Setup", { type: "mcp_tool", server: "s", tool: "t" })), /warn: mcp_tool hooks on Setup are always skipped/));
