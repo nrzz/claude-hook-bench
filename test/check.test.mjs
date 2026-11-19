@@ -73,10 +73,56 @@ test("command hooks: fields, exec form, shell, onFailure, async", () => {
   assert.ok(has(msgs(entry("Stop", { type: "http", url: "https://x.example/h", args: [] })), /warn: "args" applies to command hooks only/));
 });
 
+test("http hooks: one finding per header reference that allowedEnvVars does not list", () => {
+  const url = "https://policy.example.com/pre-tool-use";
+  const warns = (m) => m.filter((x) => x.startsWith("warn:"));
+  // the issue's own example: only $TEAM is unlisted, and the warning names the header and the variable
+  const issue = msgs(entry("PreToolUse", { type: "http", url, headers: { Authorization: "Bearer $POLICY_TOKEN", "X-Team": "$TEAM" }, allowedEnvVars: ["POLICY_TOKEN"] }));
+  assert.deepEqual(warns(issue), ['warn: the header "X-Team" uses $TEAM, which allowedEnvVars does not list: Claude Code sends an empty string for it']);
+  assert.ok(!issue.some((x) => x.startsWith("info:")), issue.join("\n"));
+  // $TOKEN-$SECRET holds two references: two warnings
+  const two = msgs(entry("PreToolUse", { type: "http", url, headers: { "X-Both": "$TOKEN-$SECRET" }, allowedEnvVars: ["OTHER"] }));
+  assert.deepEqual(warns(two), [
+    'warn: the header "X-Both" uses $TOKEN, which allowedEnvVars does not list: Claude Code sends an empty string for it',
+    'warn: the header "X-Both" uses $SECRET, which allowedEnvVars does not list: Claude Code sends an empty string for it',
+  ]);
+  // one of the two listed: one warning
+  assert.equal(warns(msgs(entry("PreToolUse", { type: "http", url, headers: { "X-Both": "$TOKEN-$SECRET" }, allowedEnvVars: ["TOKEN"] }))).length, 1);
+  // the same variable twice in one header is one finding; in two headers, one each
+  assert.equal(warns(msgs(entry("PreToolUse", { type: "http", url, headers: { A: "$X$X" }, allowedEnvVars: [] }))).length, 1);
+  assert.equal(warns(msgs(entry("PreToolUse", { type: "http", url, headers: { A: "$X", B: "${X}" }, allowedEnvVars: [] }))).length, 2);
+  // an entry no header uses is a note, never a warning
+  const unused = msgs(entry("PreToolUse", { type: "http", url, headers: { Authorization: "Bearer $POLICY_TOKEN" }, allowedEnvVars: ["POLICY_TOKEN", "UNUSED_ONE"] }));
+  assert.deepEqual(unused.filter((x) => /allowedEnvVars/.test(x)), ["info: allowedEnvVars lists UNUSED_ONE, which no header uses"]);
+  assert.equal(warns(unused).length, 0);
+  // a header with no reference is silent, with or without a list; a lone "$" is no reference
+  assert.equal(msgs(entry("PreToolUse", { type: "http", url, headers: { "X-Plain": "value", "X-Price": "5$" } })).length, 0);
+  assert.equal(msgs(entry("PreToolUse", { type: "http", url, headers: { "X-Plain": "value" }, allowedEnvVars: [] })).length, 0);
+});
+
+test("http hooks: the check and the request agree on what a reference is", async () => {
+  const { ENV_REF, headerEnvVars, resolveHeaders } = await import("../src/http.mjs");
+  assert.deepEqual(headerEnvVars("$A ${B} $C-$D x$E"), ["A", "B", "C", "D", "E"]);
+  assert.deepEqual(headerEnvVars(42), []);
+  // calling the helper twice gives the same answer: the shared pattern keeps no state between calls
+  assert.deepEqual(headerEnvVars("$A"), headerEnvVars("$A"));
+  const headers = { "X-Both": "$TOKEN-${SECRET}-$GONE" };
+  assert.deepEqual(resolveHeaders(headers, ["TOKEN", "SECRET"], { TOKEN: "t", SECRET: "s", GONE: "g" }), { "X-Both": "t-s-" });
+  // every reference the check names is one resolveHeaders blanks when it is not listed
+  const listed = new Set(["TOKEN"]);
+  const blanked = headerEnvVars(headers["X-Both"]).filter((n) => !listed.has(n));
+  assert.deepEqual(blanked, ["SECRET", "GONE"]);
+  assert.equal(resolveHeaders(headers, ["TOKEN"], { TOKEN: "t", SECRET: "s", GONE: "g" })["X-Both"], "t--");
+  assert.equal(ENV_REF.global, true);
+});
+
 test("http, mcp_tool, prompt and agent hooks", () => {
   assert.ok(has(msgs(entry("Stop", { type: "http", url: "x.example" })), /error: an http hook needs a "url" starting with http/));
   assert.ok(has(msgs(entry("Stop", { type: "http", url: "https://x.example", headers: { Authorization: "Bearer $MY_TOKEN" } })), /warn: the headers reference an environment variable, but "allowedEnvVars" does not list it/));
   assert.ok(!has(msgs(entry("Stop", { type: "http", url: "https://x.example", headers: { Authorization: "Bearer $MY_TOKEN" }, allowedEnvVars: ["MY_TOKEN"] })), /warn/));
+  assert.ok(has(msgs(entry("Stop", { type: "http", url: "https://x.example", headers: { Authorization: "Bearer ${MY_TOKEN}" } })), /warn: the headers reference an environment variable, but "allowedEnvVars" does not list it: Claude Code replaces unlisted references with empty strings/));
+  assert.ok(has(msgs(entry("Stop", { type: "http", url: "https://x.example", headers: { Authorization: "Bearer $MY_TOKEN" }, allowedEnvVars: [] })), /warn: the header "Authorization" uses \$MY_TOKEN, which allowedEnvVars does not list: Claude Code sends an empty string for it/));
+  assert.ok(has(msgs(entry("Stop", { type: "http", url: "https://x.example", headers: { Authorization: "Bearer ${MY_TOKEN}" }, allowedEnvVars: ["OTHER"] })), /warn: the header "Authorization" uses \$MY_TOKEN, which allowedEnvVars does not list: Claude Code sends an empty string for it/));
   assert.ok(has(msgs(entry("Stop", { type: "mcp_tool", server: "s" })), /error: an mcp_tool hook needs "server" and "tool" strings/));
   assert.ok(has(msgs(entry("SessionStart", { type: "mcp_tool", server: "s", tool: "t" })), /warn: mcp_tool hooks on SessionStart are skipped at launch/));
   assert.ok(has(msgs(entry("Setup", { type: "mcp_tool", server: "s", tool: "t" })), /warn: mcp_tool hooks on Setup are always skipped/));

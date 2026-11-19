@@ -254,6 +254,7 @@ The checks, from the hooks reference and from the binary (the ones marked verifi
 | `timeout` that is not a positive number; `shell`, `onFailure`, `args` values that are not allowed; `once` in a settings file; `onFailure: "block"` on `Stop` or with `async`; `async` on a blocking event | error, warn or note | docs |
 | `disableAllHooks` in effect, `allowManagedHooksOnly` set: which hooks still run | error | docs |
 | The same handler in two settings files: runs once | note | docs |
+| An `http` hook whose header uses `$VAR` or `${VAR}` for a variable `allowedEnvVars` does not list (one finding per reference, naming the header and the variable: Claude Code sends an empty string for it), or has no `allowedEnvVars` at all; an `allowedEnvVars` entry that no header uses | warn; note for an unused entry | docs |
 
 ### `explain`
 
