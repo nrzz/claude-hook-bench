@@ -4,6 +4,13 @@ All notable changes to claude-hook-bench are written here. The format follows [K
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-19
+
+- `list`, `run --http` and `/hook-bench:check` warn when an `http` hook's header uses an environment variable that `allowedEnvVars` does not list, which Claude Code fills with an empty string: one warning for each reference, naming the header and the variable (`the header "X-Team" uses $TEAM, which allowedEnvVars does not list: Claude Code sends an empty string for it`), so `$TOKEN-$SECRET` gives two. A hook with no `allowedEnvVars` at all keeps its earlier warning. An `allowedEnvVars` entry that no header uses is a note, not a warning. The README's findings table has a row for http hooks.
+- The check and the request share one pattern for a reference (`ENV_REF` in `src/http.mjs`), so they cannot disagree about what counts as one.
+- Contributed by [@madhavidayma21](https://github.com/madhavidayma21) in [#4](https://github.com/nrzz/claude-hook-bench/pull/4), for the good first issue [#3](https://github.com/nrzz/claude-hook-bench/issues/3). The pull request's tests ran on Windows, macOS and Linux with Node 18 to 24, and the real-binary checks against Claude Code on Ubuntu and macOS, before the merge.
+- The README's test count is 98: it counts tests, not the runner's 101, which includes the three helper files under `test/`.
+
 ## [1.1.0] - 2026-10-28
 
 - `run --http` runs `http` hooks, which were listed and checked but not run: it posts the event's JSON to each hook's `url` and judges the response as Claude Code does. A 2xx with an empty body is success with no output; a 2xx with a JSON object goes through the same parsing, validation and verdict as a command hook's stdout; a 2xx with any other body, a non-2xx status and a connection failure are non-blocking errors. Header values fill `$VAR` and `${VAR}` only for the variables the hook lists in `allowedEnvVars` (any other reference becomes an empty string), and the hook's `timeout` applies. It is off by default because it opens a connection, and `src/http.mjs` is the only file that may.
@@ -18,5 +25,6 @@ All notable changes to claude-hook-bench are written here. The format follows [K
 - A plugin with one user-only skill, `/hook-bench:check`.
 - The event table covers the 33 events of the hooks reference. The JSON for 17 of them was recorded from Claude Code 2.1.295 through its own binary and a fake API, and the fixtures pin the recorded keys, order and types; 86 hook outputs were put to the binary to see what it does with each, and the verdicts follow the binary where it and the reference differ (README "What was verified"). `test/e2e-claude.test.mjs` repeats the recording and 17 of the outputs against the binary; CI runs it on Linux and macOS with the newest npm release.
 
+[1.2.0]: https://github.com/nrzz/claude-hook-bench/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/nrzz/claude-hook-bench/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/nrzz/claude-hook-bench/releases/tag/v1.0.0

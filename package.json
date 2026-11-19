@@ -1,6 +1,6 @@
 {
   "name": "claude-hook-bench",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Run every hook of a Claude Code setup with the exact JSON Claude Code sends, and see what each one would do: exit code, time, output, whether the output is valid for its event, and whether it blocks, allows or stays silent. Zero tokens.",
   "type": "module",
   "bin": {

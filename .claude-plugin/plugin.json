@@ -1,7 +1,7 @@
 {
   "name": "hook-bench",
   "displayName": "Hook Bench",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Run every hook of this Claude Code setup with the JSON Claude Code sends and report what each one does: did it run, exit code, time, output, whether the output is valid for its event, and whether it blocks, allows or stays silent. One user-only skill: /hook-bench:check.",
   "author": { "name": "Naresh Prabu" },
   "homepage": "https://github.com/nrzz/claude-hook-bench",
